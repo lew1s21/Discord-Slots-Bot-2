@@ -1,3 +1,4 @@
+const startTelegram = require("./telegramListener");
 const {
     Client,
     GatewayIntentBits,
@@ -10,13 +11,19 @@ const {
     ButtonStyle,
     PermissionFlagsBits
 } = require("discord.js");
-
 // Load local environment variables from a .env file when present
 try {
-    require('dotenv').config();
-} catch (e) {
-    // dotenv is optional in production; ignore if not installed
-}
+    require("dotenv").config();
+} catch (e) {}
+
+const fs = require("fs");
+
+const ALERT_ROLES = [
+    process.env.ALERT_ROLE_1,
+    process.env.ALERT_ROLE_2,
+    process.env.ALERT_ROLE_3
+];
+// dotenv is optional in production; ignore if not installed
 
 const TOKEN = process.env.DISCORD_TOKEN || process.env.BOT_TOKEN;
 
@@ -123,8 +130,15 @@ console.error(err);
     }
 })();
 
-client.once("clientReady", () => {
+client.once("clientReady", async () => {
     console.log(`Logged in as ${client.user.tag}`);
+
+    try {
+        await startTelegram(client);
+        console.log("✅ Telegram listener started.");
+    } catch (err) {
+        console.error("Telegram error:", err);
+    }
 });
 
 function createEmbed(slotCount, slots) {
