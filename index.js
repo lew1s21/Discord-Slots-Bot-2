@@ -1,119 +1,162 @@
-const startTelegram = require("./telegramListener");
-const {
-    Client,
-    GatewayIntentBits,
-    SlashCommandBuilder,
-    REST,
-    Routes,
-    EmbedBuilder,
-    ActionRowBuilder,
-    ButtonBuilder,
-    ButtonStyle,
-    PermissionFlagsBits
-} = require("discord.js");
-// Load local environment variables from a .env file when present
-try {
-    require("dotenv").config();
-} catch (e) {}
+require("dotenv").config();
 
 const fs = require("fs");
 
-const ALERT_ROLES = [
-    process.env.ALERT_ROLE_1,
-    process.env.ALERT_ROLE_2,
-    process.env.ALERT_ROLE_3
-];
-// dotenv is optional in production; ignore if not installed
+const {
+    Client,
+    GatewayIntentBits,
+    REST,
+    Routes,
+    SlashCommandBuilder,
+    ActionRowBuilder,
+    ButtonBuilder,
+    ButtonStyle,
+    EmbedBuilder
+} = require("discord.js");
 
-const TOKEN = process.env.DISCORD_TOKEN || process.env.BOT_TOKEN;
+const TOKEN = process.env.TOKEN;
 
-if (!TOKEN) {
-    console.error("Missing DISCORD_TOKEN or BOT_TOKEN environment variable. Set it and restart.");
-    process.exit(1);
-}
-// Runtime error handlers to capture unexpected exits
-process.on('uncaughtException', (err) => {
-    console.error('Uncaught exception:', err);
-});
-process.on('unhandledRejection', (reason, promise) => {
-    console.error('Unhandled rejection at:', promise, 'reason:', reason);
-});
-process.on('exit', (code) => {
-    console.log('Process exiting with code', code);
-});
+console.log("TOKEN EXISTS:", !!TOKEN);
+
 const CLIENT_ID = "1528526031130984548";
-const GUILD_ID = "1444281245801381930";
+const GUILD_ID = "735222808526717099";
+
+const SLOT_CHANNEL_ID = "1352528395312955463";
+const MANAGER_ROLE_ID = "1474809152579698730";
 
 const client = new Client({
-    intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMembers
-    ]
+    intents: [GatewayIntentBits.Guilds]
 });
 
-const panels = new Map();
+const PANELS_FILE = "./panels.json";
+
+let panels = new Map();function savePanels() {
+    const data = {};
+
+    for (const [messageId, panel] of panels) {
+        data[messageId] = panel;
+    }
+
+    fs.writeFileSync(PANELS_FILE, JSON.stringify(data, null, 2));
+}
+
+function loadPanels() {
+    if (!fs.existsSync(PANELS_FILE)) return;
+
+    const data = JSON.parse(fs.readFileSync(PANELS_FILE));
+
+    panels = new Map(Object.entries(data));
+}
+
+loadPanels();
+
+function getActivePanel(panels) {
+    for (const messageId in panels) {
+        if (panels[messageId].active) {
+            return {
+                messageId,
+                panel: panels[messageId]
+            };
+        }
+    }
+
+    return null;
+}
+
+ function createEmbed(slotCount, slots) {
+
+    const description = [];
+
+    for (let i = 1; i <= slotCount; i++) {
+
+        if (slots[i]) {
+            description.push(`**${i}.** <@${slots[i]}>`);
+        } else {
+            description.push(`**${i}.** —`);
+        }
+
+    }
+
+    return new EmbedBuilder()
+        .setColor(0x5865F2)
+        .setTitle("🎯 Event Slots")
+        .setDescription(description.join("\n"))
+        .setFooter({
+            text: "VZP Manager"
+        });
+
+}
+
+function createButtons(slotCount) {
+
+    const rows = [];
+
+    let row = new ActionRowBuilder();
+
+    for (let i = 1; i <= slotCount; i++) {
+
+        row.addComponents(
+            new ButtonBuilder()
+                .setCustomId(`slot_${i}`)
+                .setLabel(String(i))
+                .setStyle(ButtonStyle.Primary)
+        );
+
+        if (row.components.length === 5 || i === slotCount) {
+            rows.push(row);
+            row = new ActionRowBuilder();
+        }
+    }
+
+    // Leave Slot button
+    const leaveRow = new ActionRowBuilder();
+
+    leaveRow.addComponents(
+        new ButtonBuilder()
+            .setCustomId("leave_slot")
+            .setLabel("Leave Slot")
+            .setEmoji("🚪")
+            .setStyle(ButtonStyle.Danger)
+    );
+
+    rows.push(leaveRow);
+
+    return rows;
+}
 
 const commands = [
-
     new SlashCommandBuilder()
         .setName("slots")
         .setDescription("Create a slot panel")
         .addIntegerOption(option =>
             option
                 .setName("amount")
-                .setDescription("5-50 slots")
+                .setDescription("Number of slots (5-50)")
                 .setRequired(true)
         ),
 
     new SlashCommandBuilder()
         .setName("event")
         .setDescription("Send an event announcement")
-        .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
-
         .addStringOption(option =>
-            option
-                .setName("event")
-                .setDescription("Event name")
-                .setRequired(true)
+            option.setName("event").setDescription("Event name").setRequired(true)
         )
-
         .addStringOption(option =>
-            option
-                .setName("start")
-                .setDescription("Start time")
-                .setRequired(true)
+            option.setName("start").setDescription("Start time").setRequired(true)
         )
-
         .addStringOption(option =>
-            option
-                .setName("format")
-                .setDescription("Example: 20v20")
-                .setRequired(true)
+            option.setName("format").setDescription("Format").setRequired(true)
         )
-
         .addRoleOption(option =>
-            option
-                .setName("role1")
-                .setDescription("First role")
-                .setRequired(true)
+            option.setName("role1").setDescription("First role").setRequired(true)
         )
-
         .addRoleOption(option =>
-            option
-                .setName("role2")
-                .setDescription("Second role")
-                .setRequired(false)
+            option.setName("role2").setDescription("Second role").setRequired(false)
         )
-
         .addRoleOption(option =>
-            option
-                .setName("role3")
-                .setDescription("Third role")
-                .setRequired(false)
+            option.setName("role3").setDescription("Third role").setRequired(false)
         )
-
-].map(cmd => cmd.toJSON());
-
+].map(command => command.toJSON());
 const rest = new REST({ version: "10" }).setToken(TOKEN);
 
 (async () => {
@@ -123,232 +166,366 @@ const rest = new REST({ version: "10" }).setToken(TOKEN);
             { body: commands }
         );
 
-        console.log("Slash command registered.");
+        console.log("✅ Slash commands registered.");
     } catch (err) {
-    console.error("REGISTER ERROR:");
-console.error(err);
+        console.error(err);
     }
 })();
+client.once("ready", () => {
+    console.log(`✅ Logged in as ${client.user.tag}`);
+}); 
 
-client.once("clientReady", async () => {
-    console.log(`Logged in as ${client.user.tag}`);
+client.on("interactionCreate", async (interaction) => {
 
     try {
-        await startTelegram(client);
-        console.log("✅ Telegram listener started.");
-    } catch (err) {
-        console.error("Telegram error:", err);
-    }
-});
 
-function createEmbed(slotCount, slots) {
-    let text = "";
-
-    for (let i = 1; i <= slotCount; i++) {
-        const userId = slots[i];
-
-        if (userId) {
-            text += `${i}. <@${userId}>\n`;
-        } else {
-            text += `${i}.\n`;
-        }
-    }
-
-    return new EmbedBuilder()
-        .setTitle("🎯 Choose your position!")
-        .setDescription(text)
-        .setColor(0x5865F2)
-        .setFooter({
-            text: "Click a slot button to reserve it."
-        });
-}
-
-function createButtons(slotCount) {
-    const rows = [];
-
-    for (let i = 1; i <= slotCount; i += 5) {
-        const row = new ActionRowBuilder();
-
-        for (let j = i; j < i + 5 && j <= slotCount; j++) {
-            row.addComponents(
-                new ButtonBuilder()
-                    .setCustomId(`slot_${j}`)
-                    .setLabel(`${j}`)
-                    .setStyle(ButtonStyle.Primary)
-            );
+        if (!interaction.isChatInputCommand() && !interaction.isButton()) {
+            return;
         }
 
-        rows.push(row);
-    }
-
-    return rows;
-}
-
-client.on("interactionCreate", async interaction => {
-
-    if (interaction.isChatInputCommand()) {
-
-        if (interaction.commandName === "slots") {
-
-            const amount = interaction.options.getInteger("amount");
-
-            if (amount < 5 || amount > 50) {
-                return interaction.reply({
-                    content: "❌ Slots must be between 5 and 50.",
-                    flags: 64
-                });
-            }
-
-            const slots = {};
-
-            const embed = createEmbed(amount, slots);
-            const rows = createButtons(amount);
-
-            const message = await interaction.reply({
-                embeds: [embed],
-                components: rows,
-                fetchReply: true
+        if (interaction.member && !interaction.member.roles.cache.has(MANAGER_ROLE_ID) && interaction.isChatInputCommand()) {
+            return interaction.reply({
+                content: "❌ You don't have permission to use this command.",
+                ephemeral: true
             });
+        }
 
-            panels.set(message.id, {
-    slotCount: amount,
-    slots
+        if (interaction.isChatInputCommand()) {
+
+            switch (interaction.commandName) {
+
+                case "slots": {
+
+                    const amount = interaction.options.getInteger("amount");
+
+                    if (amount < 5 || amount > 50) {
+                        return interaction.reply({
+                            content: "❌ Slot amount must be between 5 and 50.",
+                            ephemeral: true
+                        });
+                    }
+
+                    const old = getActivePanel(panels);
+
+                    if (old) {
+                        old.panel.active = false;
+                    }
+
+                    const panel = {
+                        slotCount: amount,
+                        slots: {},
+                        active: true,
+                        locked: false
+                    };
+
+                    const channel = await client.channels.fetch(SLOT_CHANNEL_ID);
+
+                    const message = await channel.send({
+    embeds: [createEmbed(panel.slotCount, panel.slots)],
+    components: createButtons(panel.slotCount)
 });
-}
 
-if (interaction.commandName === "event") {
+                    panels[message.id] = panel;
 
-    const event = interaction.options.getString("event");
-    const start = interaction.options.getString("start");
-    const format = interaction.options.getString("format");
+                    savePanels(panels);
 
-    const role1 = interaction.options.getRole("role1");
-    const role2 = interaction.options.getRole("role2");
-    const role3 = interaction.options.getRole("role3");
+                    return interaction.reply({
+                        content: "✅ Slot panel created.",
+                        ephemeral: true
+                    });
 
-    const roles = [role1, role2, role3]
-        .filter(role => role)
-        .map(role => role.toString())
-        .join(" ");
+                }
+                                case "close": {
 
-    const embed = new EmbedBuilder()
-        .setColor(0x5865F2)
-        .setTitle("📢 EVENT")
-        .setDescription(
-`🎯 **Event:** ${event}
+                    const active = getActivePanel(panels);
 
-⚔️ **Format:** ${format}
+                    if (!active) {
+                        return interaction.reply({
+                            content: "❌ No active panel.",
+                            ephemeral: true
+                        });
+                    }
 
-🕒 **Start:** ${start}`
+                    active.panel.active = false;
+
+                    const message = await interaction.channel.messages.fetch(active.messageId);
+
+                    await message.edit({
+    embeds: [createEmbed(
+        active.panel.slotCount,
+        active.panel.slots
+    )],
+    components: createButtons(
+        active.panel.slotCount
+    )
+});
+
+                    savePanels(panels);
+
+                    return interaction.reply({
+                        content: "✅ Panel closed.",
+                        ephemeral: true
+                    });
+
+                }   
+
+                case "reset": {
+
+                    const active = getActivePanel(panels);
+
+                    if (!active) {
+                        return interaction.reply({
+                            content: "❌ No active panel.",
+                            ephemeral: true
+                        });
+                    }
+
+                    active.panel.slots = {};
+
+                    const message = await interaction.channel.messages.fetch(active.messageId);
+
+await message.edit({
+    embeds: [
+        createEmbed(
+            active.panel.slotCount,
+            active.panel.slots
         )
-        .setFooter({
-            text: "━━━━━━━━━━━━━━━━━━━━━━\nVZP Manager • GTA RP"
-        });
+    ],
+    components: createButtons(
+        active.panel.slotCount
+    )
+});
 
-    // Send event in the channel
-    await interaction.reply({
-        content: roles,
-        embeds: [embed]
-    });
+savePanels(panels);
 
-    // DM everyone with the selected roles
-    const guild = interaction.guild;
+                    return interaction.reply({
+                        content: "✅ Slots reset.",
+                        ephemeral: true
+                    });
 
-    await guild.members.fetch();
+                }
 
-    const targetRoles = [role1, role2, role3].filter(Boolean);
+                case "lock": {
 
-    let sent = 0;
-    let failed = 0;
+                    const active = getActivePanel(panels);
 
-    for (const member of guild.members.cache.values()) {
+                    if (!active) {
+                        return interaction.reply({
+                            content: "❌ No active panel.",
+                            ephemeral: true
+                        });
+                    }
 
-        if (member.user.bot) continue;
+                    active.panel.locked = true;
 
-        const hasRole = targetRoles.some(role =>
-            member.roles.cache.has(role.id)
-        );
+                    const message = await interaction.channel.messages.fetch(active.messageId);
 
-        if (!hasRole) continue;
+await message.edit({
+    embeds: [
+        createEmbed(
+            active.panel.slotCount,
+            active.panel.slots
+        )
+    ],
+    components: createButtons(
+        active.panel.slotCount
+    )
+});
 
-        try {
-            await member.send({
-                content: "📢 You have been invited to an event!",
-                embeds: [embed]
-            });
+savePanels(panels);
 
-            sent++;
+                    return interaction.reply({
+                        content: "🔒 Panel locked.",
+                        ephemeral: true
+                    });
 
-        } catch {
-            failed++;
+                }
+
+                case "unlock": {
+
+                    const active = getActivePanel(panels);
+
+                    if (!active) {
+                        return interaction.reply({
+                            content: "❌ No active panel.",
+                            ephemeral: true
+                        });
+                    }
+
+                    active.panel.locked = false;
+
+                    const message = await interaction.channel.messages.fetch(active.messageId);
+
+await message.edit({
+    embeds: [
+        createEmbed(
+            active.panel.slotCount,
+            active.panel.slots
+        )
+    ],
+    components: createButtons(
+        active.panel.slotCount
+    )
+});
+
+savePanels(panels);
+
+                      }
+            }
         }
+
+        if (interaction.isButton()) {
+
+    const customId = interaction.customId;
+
+    const active = getActivePanel(panels);
+
+    if (!active) {
+        return interaction.reply({
+            content: "❌ There is no active slot panel.",
+            ephemeral: true
+        });
     }
 
-    await interaction.followUp({
-    content: `✅ Sent ${sent} DMs.\n❌ Failed to send ${failed} DMs.`,
-    flags: 64
-});
-}
+    const panel = active.panel;
 
-return;
-}
+    // =========================
+    // LEAVE SLOT BUTTON
+    // =========================
 
-if (interaction.isButton()) {
+    if (customId === "leave_slot") {
 
-        const panel = panels.get(interaction.message.id);
-
-        if (!panel) {
+        if (!panel.active) {
             return interaction.reply({
-                content: "❌ Panel not found.",
-                flags: 64
+                content: "❌ This panel is closed.",
+                ephemeral: true
             });
         }
 
-        const slotNumber = Number(
-            interaction.customId.replace("slot_", "")
-        );
-
-        const userId = interaction.user.id;
-
-        if (
-            panel.slots[slotNumber] &&
-            panel.slots[slotNumber] !== userId
-        ) {
+        if (panel.locked) {
             return interaction.reply({
-                content: "❌ This slot is already taken.",
-                flags: 64
+                content: "🔒 This panel is locked.",
+                ephemeral: true
             });
         }
 
-        let currentSlot = null;
+        let userSlot = null;
 
-        for (const [slot, owner] of Object.entries(panel.slots)) {
-            if (owner === userId) {
-                currentSlot = Number(slot);
+        for (const existingSlot in panel.slots) {
+
+            if (panel.slots[existingSlot] === interaction.user.id) {
+                userSlot = existingSlot;
                 break;
             }
+
         }
 
-        if (currentSlot === slotNumber) {
-            delete panel.slots[currentSlot];
-        } else {
-
-            if (currentSlot) {
-                delete panel.slots[currentSlot];
-            }
-
-            panel.slots[slotNumber] = userId;
+        if (!userSlot) {
+            return interaction.reply({
+                content: "❌ You don't have a slot.",
+                ephemeral: true
+            });
         }
 
-        await interaction.update({
+        delete panel.slots[userSlot];
+
+        savePanels(panels);
+
+        const message = await interaction.channel.messages.fetch(
+            active.messageId
+        );
+
+        await message.edit({
             embeds: [
                 createEmbed(
                     panel.slotCount,
                     panel.slots
                 )
-            ],  
-            components: createButtons(panel.slotCount)
+            ],
+            components: createButtons(
+                panel.slotCount
+            )
         });
+
+        return interaction.reply({
+            content: `✅ You left slot **${userSlot}**.`,
+            ephemeral: true
+        });
+    }
+
+    // =========================
+    // SLOT BUTTONS
+    // =========================
+
+    if (!customId.startsWith("slot_")) {
+        return;
+    }
+
+    const slot = Number(customId.split("_")[1]);
+
+    if (!panel.active) {
+        return interaction.reply({
+            content: "❌ This panel is closed.",
+            ephemeral: true
+        });
+    }
+
+    if (panel.locked) {
+        return interaction.reply({
+            content: "🔒 This panel is locked.",
+            ephemeral: true
+        });
+    }
+
+    if (panel.slots[slot]) {
+        return interaction.reply({
+            content: "❌ This slot is already taken.",
+            ephemeral: true
+        });
+    }
+
+    // If user already has another slot, remove it
+    for (const existingSlot in panel.slots) {
+
+        if (
+            panel.slots[existingSlot] === interaction.user.id &&
+            Number(existingSlot) !== slot
+        ) {
+            delete panel.slots[existingSlot];
+            break;
+        }
+
+    }
+
+    // Give user the new slot
+    panel.slots[slot] = interaction.user.id;
+
+    savePanels(panels);
+
+    const message = await interaction.channel.messages.fetch(
+        active.messageId
+    );
+
+    await message.edit({
+        embeds: [
+            createEmbed(
+                panel.slotCount,
+                panel.slots
+            )
+        ],
+        components: createButtons(
+            panel.slotCount
+        )
+    });
+
+    return interaction.reply({
+        content: `✅ You successfully picked slot **${slot}**.`,
+        ephemeral: true
+    });
+}
+
+    } catch (err) {
+        console.error(err);
     }
 });
 

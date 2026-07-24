@@ -14,7 +14,11 @@ function createEmbed(slotCount, slots) {
 
     return new EmbedBuilder()
         .setTitle("🎯 Choose your position!")
-        .setDescription(text)
+        .setDescription(
+    text.trim().length > 0
+        ? text
+        : "No slots available."
+)
         .setColor(COLORS.primary)
         .setFooter({
             text: FOOTER
